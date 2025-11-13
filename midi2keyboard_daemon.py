@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""
+MIDI to Keyboard Daemon - FIXED VERSION
+Wayland-compatible version that accepts port parameter
+"""
+
+import rtmidi
+import time
+import json
+import argparse
+import os
+import sys
+from evdev import UInput, ecodes as e
+
+class WaylandMidiMapper:
+    def __init__(self, config_file, port=0):
+        self.config_file = config_file
+        self.midi_port = port
+        self.midi_in = rtmidi.MidiIn()
+        self.ui = None
+        self.running = False
+        self.active_notes = {}
+        self.key_mappings = {}
+        
+        self.load_config()
+        self.setup_uinput()
+    
+    def load_config(self):
+        """Load configuration from file"""
+        try:
+            with open(self.config_file, 'r') as f:
+                config = json.load(f)
+                if 'mappings' in config:
+                    # Convert string key names to evdev key codes
+                    for midi_note, key_name in config['mappings'].items():
+                        key_code = getattr(e, f"KEY_{key_name.upper()}", None)
+                        if key_code:
+                            self.key_mappings[int(midi_note)] = key_code
+                            print(f"Loaded mapping: MIDI {midi_note} -> {key_name} (keycode: {key_code})")
+                        else:
+                            print(f"Warning: Unknown key name '{key_name}' for MIDI note {midi_note}")
+                print(f"Configuration loaded from {self.config_file}")
+        except Exception as ex:
+            print(f"Error loading config: {ex}")
+            sys.exit(1)
+    
+    def setup_uinput(self):
+        """Setup uinput device for Wayland compatibility"""
+        # Include all possible key types to ensure compatibility
+        capabilities = {
+            e.EV_KEY: list(e.keys.keys())
+        }
+        self.ui = UInput(capabilities, name='midi2keyboard-virtual-device')
+        print("Virtual input device created")
+    
+    def note_on_handler(self, note, velocity):
+        """Handle MIDI note-on events"""
+        if note in self.key_mappings:
+            key_code = self.key_mappings[note]
+            
+            # Press the key
+            self.ui.write(e.EV_KEY, key_code, 1)
+            self.ui.syn()
+            
+            self.active_notes[note] = key_code
+            print(f"Note {note} (velocity {velocity}) -> Key {key_code} PRESSED")
+        else:
+            print(f"Note {note} pressed but no mapping found")
+    
+    def note_off_handler(self, note):
+        """Handle MIDI note-off events"""
+        if note in self.active_notes:
+            key_code = self.active_notes[note]
+            
+            # Release the key
+            self.ui.write(e.EV_KEY, key_code, 0)
+            self.ui.syn()
+            
+            del self.active_notes[note]
+            print(f"Note {note} -> Key {key_code} RELEASED")
+    
+    def control_change_handler(self, control, value):
+        """Handle MIDI control change events"""
+        if control in self.key_mappings:
+            key_code = self.key_mappings[control]
+            # For CC, we can make it toggle or hold based on value
+            if value >= 64:  # On threshold
+                if control not in self.active_notes:
+                    self.ui.write(e.EV_KEY, key_code, 1)
+                    self.ui.syn()
+                    self.active_notes[control] = key_code
+                    print(f"CC {control} (value {value}) -> Key {key_code} PRESSED")
+            else:  # Off threshold
+                if control in self.active_notes:
+                    self.ui.write(e.EV_KEY, key_code, 0)
+                    self.ui.syn()
+                    del self.active_notes[control]
+                    print(f"CC {control} (value {value}) -> Key {key_code} RELEASED")
+        else:
+            print(f"CC {control} changed to {value} but no mapping found")
+    
+    def midi_callback(self, event, data=None):
+        """Callback for MIDI input"""
+        message, delta_time = event
+        message_type = message[0] & 0xF0
+        
+        if message_type == 0x90:  # Note On
+            note, velocity = message[1], message[2]
+            if velocity > 0:
+                self.note_on_handler(note, velocity)
+            else:  # Note On with velocity 0 treated as Note Off
+                self.note_off_handler(note)
+                
+        elif message_type == 0x80:  # Note Off
+            note = message[1]
+            self.note_off_handler(note)
+            
+        elif message_type == 0xB0:  # Control Change
+            control, value = message[1], message[2]
+            self.control_change_handler(control, value)
+        
+        elif message_type == 0xA0:  # Aftertouch
+            note, value = message[1], message[2]
+            print(f"Aftertouch: note {note}, value {value}")
+        
+        elif message_type == 0xD0:  # Channel Pressure
+            value = message[1]
+            print(f"Channel Pressure: value {value}")
+        
+        elif message_type == 0xE0:  # Pitch Bend
+            lsb, msb = message[1], message[2]
+            value = (msb << 7) | lsb
+            print(f"Pitch Bend: value {value}")
+    
+    def list_ports(self):
+        """List available MIDI ports"""
+        ports = self.midi_in.get_ports()
+        if not ports:
+            print("No MIDI input ports found!")
+            return []
+        
+        print("Available MIDI ports:")
+        for i, port in enumerate(ports):
+            print(f"  {i}: {port}")
+        return ports
+    
+    def start(self):
+        """Start the MIDI mapper"""
+        ports = self.list_ports()
+        if not ports:
+            return False
+        
+        # Use the specified port
+        port_number = self.midi_port
+        if port_number >= len(ports):
+            print(f"Error: Requested port {port_number} not available. Only {len(ports)} ports found.")
+            return False
+        
+        try:
+            print(f"Attempting to connect to MIDI port {port_number}: {ports[port_number]}")
+            self.midi_in.open_port(port_number)
+            self.midi_in.set_callback(self.midi_callback)
+            self.midi_in.ignore_types(sysex=False, timing=False, active_sense=False)
+            
+            self.running = True
+            
+            print(f"Successfully connected to MIDI port: {ports[port_number]}")
+            print("MIDI to Keyboard mapper started!")
+            print("Active mappings:")
+            for note, key_code in self.key_mappings.items():
+                key_name = [k for k, v in e.keys.items() if v == key_code][0] if key_code in e.keys.values() else "UNKNOWN"
+                print(f"  MIDI {note} -> {key_name} (code: {key_code})")
+            print("Press Ctrl+C to stop")
+            
+            # Keep the program running
+            while self.running:
+                time.sleep(0.1)
+                
+        except KeyboardInterrupt:
+            print("\nStopping...")
+        except Exception as ex:
+            print(f"Error: {ex}")
+        finally:
+            self.stop()
+        
+        return True
+    
+    def stop(self):
+        """Stop the mapper and clean up"""
+        self.running = False
+        # Release all active keys
+        for key_code in self.active_notes.values():
+            self.ui.write(e.EV_KEY, key_code, 0)
+        self.ui.syn()
+        
+        if self.midi_in:
+            self.midi_in.close_port()
+        if self.ui:
+            self.ui.close()
+        print("MIDI to Keyboard mapper stopped.")
+
+def main():
+    parser = argparse.ArgumentParser(description='MIDI to Keyboard Daemon - Fixed')
+    parser.add_argument('--config', '-c', required=True, help='Configuration file')
+    parser.add_argument('--port', '-p', type=int, default=0, help='MIDI port number')
+    
+    args = parser.parse_args()
+    
+    # Check if running as root
+    if os.geteuid() != 0:
+        print("Error: This daemon requires root privileges to simulate keyboard input.")
+        print("Please run through the GUI or use: sudo python3 midi2keyboard_daemon_fixed.py -c config.json -p PORT")
+        sys.exit(1)
+    
+    if not os.path.exists(args.config):
+        print(f"Error: Configuration file not found: {args.config}")
+        sys.exit(1)
+    
+    print(f"Starting MIDI mapper with config: {args.config}, port: {args.port}")
+    mapper = WaylandMidiMapper(args.config, args.port)
+    mapper.start()
+
+if __name__ == "__main__":
+    main()

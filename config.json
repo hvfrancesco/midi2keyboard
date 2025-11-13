@@ -1,0 +1,57 @@
+{
+  "mappings": {
+    "48": {
+      "key": "b",
+      "desc": "Brush tool"
+    },
+    "50": {
+      "key": "e",
+      "desc": "Eraser"
+    },
+    "52": {
+      "key": "v",
+      "desc": "Select tool"
+    },
+    "53": {
+      "key": "m",
+      "desc": "Move tool"
+    },
+    "55": {
+      "key": "z",
+      "desc": "Zoom"
+    },
+    "60": {
+      "key": "1",
+      "desc": "Color 1"
+    },
+    "62": {
+      "key": "2",
+      "desc": "Color 2"
+    },
+    "64": {
+      "key": "d",
+      "desc": "Default colors"
+    },
+    "65": {
+      "key": "x",
+      "desc": "Swap colors"
+    },
+    "67": {
+      "key": "leftshift",
+      "desc": "Modifier"
+    },
+    "72": {
+      "key": "leftbrace",
+      "desc": "Decrease brush"
+    },
+    "74": {
+      "key": "rightbrace",
+      "desc": "Increase brush"
+    },
+    "21": {
+      "key": "f",
+      "desc": "fff"
+    }
+  },
+  "midi_port": 1
+}
