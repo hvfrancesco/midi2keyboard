@@ -1,0 +1,496 @@
+#!/usr/bin/env python3
+"""
+MIDI to Keyboard Mapper with GUI - FIXED VERSION
+Wayland-compatible version with working mapping configuration
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import rtmidi
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+class MidiMapperGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("MIDI to Keyboard Mapper")
+        self.root.geometry("900x700")
+        
+        # Configuration
+        self.config_file = Path.home() / '.config' / 'midi2keyboard' / 'mappings.json'
+        self.config_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        self.midi_ports = []
+        self.current_mappings = {}
+        self.midi_in = None
+        self.mapping_process = None
+        
+        # Load existing configuration
+        self.load_config()
+        
+        self.setup_gui()
+        self.refresh_midi_ports()
+        
+        # Bind close event
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def setup_gui(self):
+        """Setup the main GUI"""
+        # Main frame
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Configure grid weights
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        
+        # MIDI Port Selection
+        ttk.Label(main_frame, text="MIDI Port:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.port_var = tk.StringVar()
+        self.port_combo = ttk.Combobox(main_frame, textvariable=self.port_var, state="readonly")
+        self.port_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5)
+        
+        refresh_btn = ttk.Button(main_frame, text="Refresh Ports", command=self.refresh_midi_ports)
+        refresh_btn.grid(row=0, column=2, padx=5, pady=5)
+        
+        # Status
+        self.status_var = tk.StringVar(value="Not running")
+        status_label = ttk.Label(main_frame, textvariable=self.status_var, foreground="red")
+        status_label.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=5)
+        
+        # Control buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        
+        self.start_btn = ttk.Button(button_frame, text="Start Mapping", command=self.start_mapping)
+        self.start_btn.grid(row=0, column=0, padx=5)
+        
+        self.stop_btn = ttk.Button(button_frame, text="Stop Mapping", command=self.stop_mapping, state="disabled")
+        self.stop_btn.grid(row=0, column=1, padx=5)
+        
+        test_btn = ttk.Button(button_frame, text="Test MIDI Input", command=self.test_midi_input)
+        test_btn.grid(row=0, column=2, padx=5)
+        
+        # Mappings frame
+        mappings_frame = ttk.LabelFrame(main_frame, text="MIDI to Keyboard Mappings", padding="10")
+        mappings_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        mappings_frame.columnconfigure(1, weight=1)
+        
+        # Treeview for mappings
+        columns = ('midi_note', 'key_name', 'description')
+        self.mappings_tree = ttk.Treeview(mappings_frame, columns=columns, show='headings', height=15)
+        
+        # Define headings
+        self.mappings_tree.heading('midi_note', text='MIDI Note/CC')
+        self.mappings_tree.heading('key_name', text='Key Name')
+        self.mappings_tree.heading('description', text='Description')
+        
+        # Define columns
+        self.mappings_tree.column('midi_note', width=120)
+        self.mappings_tree.column('key_name', width=150)
+        self.mappings_tree.column('description', width=400)
+        
+        self.mappings_tree.grid(row=0, column=0, columnspan=4, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Scrollbar for treeview
+        scrollbar = ttk.Scrollbar(mappings_frame, orient=tk.VERTICAL, command=self.mappings_tree.yview)
+        self.mappings_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=4, sticky=(tk.N, tk.S))
+        
+        # Mapping controls
+        mapping_controls = ttk.Frame(mappings_frame)
+        mapping_controls.grid(row=1, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=10)
+        
+        ttk.Label(mapping_controls, text="MIDI Note/CC:").grid(row=0, column=0, padx=5)
+        self.new_note_var = tk.StringVar()
+        note_entry = ttk.Entry(mapping_controls, textvariable=self.new_note_var, width=10)
+        note_entry.grid(row=0, column=1, padx=5)
+        
+        ttk.Label(mapping_controls, text="Key:").grid(row=0, column=2, padx=5)
+        self.new_key_var = tk.StringVar()
+        self.key_combo = ttk.Combobox(mapping_controls, textvariable=self.new_key_var, width=15)
+        self.key_combo['values'] = self.get_available_keys()
+        self.key_combo.grid(row=0, column=3, padx=5)
+        
+        ttk.Label(mapping_controls, text="Description:").grid(row=0, column=4, padx=5)
+        self.new_desc_var = tk.StringVar()
+        desc_entry = ttk.Entry(mapping_controls, textvariable=self.new_desc_var, width=30)
+        desc_entry.grid(row=0, column=5, padx=5)
+        
+        add_btn = ttk.Button(mapping_controls, text="Add Mapping", command=self.add_mapping)
+        add_btn.grid(row=0, column=6, padx=5)
+        
+        remove_btn = ttk.Button(mapping_controls, text="Remove Selected", command=self.remove_mapping)
+        remove_btn.grid(row=0, column=7, padx=5)
+        
+        # File operations
+        file_frame = ttk.Frame(main_frame)
+        file_frame.grid(row=4, column=0, columnspan=3, pady=10)
+        
+        ttk.Button(file_frame, text="Load Configuration", command=self.load_config_dialog).grid(row=0, column=0, padx=5)
+        ttk.Button(file_frame, text="Save Configuration", command=self.save_config_dialog).grid(row=0, column=1, padx=5)
+        ttk.Button(file_frame, text="Reset to Defaults", command=self.reset_to_defaults).grid(row=0, column=2, padx=5)
+        
+        # Configure main frame row weights
+        main_frame.rowconfigure(3, weight=1)
+        mappings_frame.rowconfigure(0, weight=1)
+        mappings_frame.columnconfigure(0, weight=1)
+        
+        # Bind double-click to edit
+        self.mappings_tree.bind('<Double-1>', self.on_mapping_double_click)
+        
+        # Populate mappings tree
+        self.refresh_mappings_tree()
+    
+    def get_available_keys(self):
+        """Return list of available key names"""
+        common_keys = [
+            'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+            'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+            'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12',
+            'space', 'tab', 'enter', 'backspace', 'escape',
+            'left', 'right', 'up', 'down',
+            'leftshift', 'rightshift', 'leftctrl', 'rightctrl', 'leftalt', 'rightalt',
+            'comma', 'period', 'slash', 'semicolon', 'apostrophe', 'backslash',
+            'leftbrace', 'rightbrace', 'equal', 'minus', 'grave'
+        ]
+        return common_keys
+    
+    def refresh_midi_ports(self):
+        """Refresh list of available MIDI ports"""
+        if self.midi_in is None:
+            self.midi_in = rtmidi.MidiIn()
+        
+        self.midi_ports = self.midi_in.get_ports()
+        port_values = []
+        for i, port in enumerate(self.midi_ports):
+            port_values.append(f"{i}: {port}")
+        
+        self.port_combo['values'] = port_values
+        
+        if self.midi_ports:
+            self.port_combo.set(port_values[0])
+        else:
+            self.port_combo.set('')
+            messagebox.showwarning("No MIDI Ports", "No MIDI input ports found. Please connect your MIDI controller.")
+    
+    def load_config(self, filename=None):
+        """Load configuration from file"""
+        if filename is None:
+            filename = self.config_file
+        
+        if not os.path.exists(filename):
+            # Create default configuration
+            self.current_mappings = {
+                'mappings': {
+                    '48': {'key': 'b', 'desc': 'Brush tool'},
+                    '50': {'key': 'e', 'desc': 'Eraser'},
+                    '52': {'key': 'v', 'desc': 'Select tool'},
+                    '53': {'key': 'm', 'desc': 'Move tool'},
+                    '55': {'key': 'z', 'desc': 'Zoom'},
+                    '60': {'key': '1', 'desc': 'Color 1'},
+                    '62': {'key': '2', 'desc': 'Color 2'},
+                    '64': {'key': 'd', 'desc': 'Default colors'},
+                    '65': {'key': 'x', 'desc': 'Swap colors'},
+                    '67': {'key': 'leftshift', 'desc': 'Modifier'},
+                    '72': {'key': 'leftbrace', 'desc': 'Decrease brush size'},
+                    '74': {'key': 'rightbrace', 'desc': 'Increase brush size'},
+                },
+                'midi_port': 0
+            }
+            self.save_config()
+        else:
+            try:
+                with open(filename, 'r') as f:
+                    self.current_mappings = json.load(f)
+                print(f"Configuration loaded from {filename}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load configuration: {e}")
+    
+    def save_config(self, filename=None):
+        """Save configuration to file"""
+        if filename is None:
+            filename = self.config_file
+        
+        try:
+            with open(filename, 'w') as f:
+                json.dump(self.current_mappings, f, indent=2)
+            print(f"Configuration saved to {filename}")
+            return True
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save configuration: {e}")
+            return False
+    
+    def refresh_mappings_tree(self):
+        """Refresh the mappings treeview"""
+        for item in self.mappings_tree.get_children():
+            self.mappings_tree.delete(item)
+        
+        if 'mappings' in self.current_mappings:
+            for note, mapping in self.current_mappings['mappings'].items():
+                self.mappings_tree.insert('', tk.END, values=(
+                    note, mapping['key'], mapping['desc']
+                ))
+    
+    def add_mapping(self):
+        """Add a new mapping"""
+        note = self.new_note_var.get().strip()
+        key = self.new_key_var.get().strip()
+        desc = self.new_desc_var.get().strip()
+        
+        if not note:
+            messagebox.showwarning("Input Error", "Please enter a MIDI note/CC number")
+            return
+        
+        if not key:
+            messagebox.showwarning("Input Error", "Please select a key")
+            return
+        
+        # Validate MIDI note is a number
+        try:
+            note_int = int(note)
+            if note_int < 0 or note_int > 127:
+                messagebox.showwarning("Input Error", "MIDI note/CC must be between 0 and 127")
+                return
+        except ValueError:
+            messagebox.showwarning("Input Error", "MIDI note/CC must be a number")
+            return
+        
+        # Validate key is in available keys
+        if key not in self.get_available_keys():
+            messagebox.showwarning("Input Error", f"Invalid key: {key}")
+            return
+        
+        if 'mappings' not in self.current_mappings:
+            self.current_mappings['mappings'] = {}
+        
+        self.current_mappings['mappings'][note] = {
+            'key': key,
+            'desc': desc or f"MIDI {note} to {key}"
+        }
+        
+        self.refresh_mappings_tree()
+        self.new_note_var.set('')
+        self.new_key_var.set('')
+        self.new_desc_var.set('')
+        
+        # Auto-save configuration
+        self.save_config()
+        
+        print(f"Added mapping: MIDI {note} -> {key} ({desc})")
+    
+    def remove_mapping(self):
+        """Remove selected mapping"""
+        selected = self.mappings_tree.selection()
+        if not selected:
+            messagebox.showwarning("Selection Error", "Please select a mapping to remove")
+            return
+        
+        for item in selected:
+            values = self.mappings_tree.item(item)['values']
+            if values and values[0] in self.current_mappings.get('mappings', {}):
+                note = values[0]
+                del self.current_mappings['mappings'][note]
+                print(f"Removed mapping for MIDI note {note}")
+        
+        self.refresh_mappings_tree()
+        self.save_config()
+    
+    def on_mapping_double_click(self, event):
+        """Edit mapping on double click"""
+        item = self.mappings_tree.selection()
+        if item:
+            item = item[0]
+            values = self.mappings_tree.item(item)['values']
+            if values:
+                self.new_note_var.set(values[0])
+                self.new_key_var.set(values[1])
+                self.new_desc_var.set(values[2])
+    
+    def get_selected_port_index(self):
+        """Get the selected MIDI port index"""
+        selected = self.port_combo.get()
+        if selected and ':' in selected:
+            return int(selected.split(':')[0])
+        return 0
+    
+    def start_mapping(self):
+        """Start the MIDI to keyboard mapping"""
+        if not self.midi_ports:
+            messagebox.showerror("Error", "No MIDI ports available")
+            return
+        
+        selected_port = self.get_selected_port_index()
+        print(f"Starting mapping on port {selected_port}: {self.midi_ports[selected_port]}")
+        
+        # Save current configuration with selected port
+        self.current_mappings['midi_port'] = selected_port
+        self.save_config()
+        
+        # Export configuration for daemon
+        daemon_config = self.export_config_for_daemon()
+        
+        # Start the daemon process
+        try:
+            # Get the path to the daemon script
+            daemon_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'midi2keyboard_daemon.py')
+            
+            # Start the daemon with the selected port
+            self.mapping_process = subprocess.Popen([
+                'pkexec', 'python3', daemon_script,
+                '--config', daemon_config,
+                '--port', str(selected_port)
+            ])
+            
+            self.status_var.set(f"Mapping active - port {selected_port}")
+            self.start_btn.config(state='disabled')
+            self.stop_btn.config(state='normal')
+            
+            print(f"Daemon started with config: {daemon_config}, port: {selected_port}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start mapping daemon: {e}")
+            print(f"Error starting daemon: {e}")
+    
+    def stop_mapping(self):
+        """Stop the MIDI to keyboard mapping"""
+        if self.mapping_process:
+            self.mapping_process.terminate()
+            try:
+                self.mapping_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.mapping_process.kill()
+            self.mapping_process = None
+        
+        self.status_var.set("Not running")
+        self.start_btn.config(state='normal')
+        self.stop_btn.config(state='disabled')
+        print("Mapping stopped")
+    
+    def test_midi_input(self):
+        """Test MIDI input from selected port"""
+        selected_port = self.get_selected_port_index()
+        if selected_port >= len(self.midi_ports):
+            messagebox.showerror("Error", "Invalid MIDI port selected")
+            return
+        
+        def test_thread():
+            midi_in = rtmidi.MidiIn()
+            try:
+                midi_in.open_port(selected_port)
+                midi_in.ignore_types(sysex=False, timing=False, active_sense=False)
+                
+                self.root.after(0, lambda: messagebox.showinfo("MIDI Test", 
+                    "MIDI test started. Press keys on your MIDI controller. Check terminal for output."))
+                
+                print(f"MIDI Test Mode - Port {selected_port}: {self.midi_ports[selected_port]}")
+                print("Press keys on your MIDI controller. Press Ctrl+C in terminal to stop test.")
+                
+                try:
+                    timer = time.time()
+                    while time.time() - timer < 30:  # 30 second timeout
+                        msg = midi_in.get_message()
+                        if msg:
+                            message, delta_time = msg
+                            print(f"MIDI message: {message}")
+                        time.sleep(0.01)
+                except KeyboardInterrupt:
+                    pass
+                finally:
+                    midi_in.close_port()
+                    print("MIDI test ended")
+                    
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("Error", f"MIDI test failed: {e}"))
+        
+        threading.Thread(target=test_thread, daemon=True).start()
+    
+    def load_config_dialog(self):
+        """Load configuration from file dialog"""
+        filename = filedialog.askopenfilename(
+            title="Load Configuration",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            self.load_config(filename)
+            self.refresh_mappings_tree()
+            messagebox.showinfo("Success", f"Configuration loaded from {filename}")
+    
+    def save_config_dialog(self):
+        """Save configuration to file dialog"""
+        filename = filedialog.asksaveasfilename(
+            title="Save Configuration",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            if self.save_config(filename):
+                messagebox.showinfo("Success", f"Configuration saved to {filename}")
+    
+    def reset_to_defaults(self):
+        """Reset to default mappings"""
+        if messagebox.askyesno("Confirm Reset", "Reset all mappings to defaults?"):
+            self.current_mappings = {
+                'mappings': {
+                    '48': {'key': 'b', 'desc': 'Brush tool'},
+                    '50': {'key': 'e', 'desc': 'Eraser'},
+                    '52': {'key': 'v', 'desc': 'Select tool'},
+                    '53': {'key': 'm', 'desc': 'Move tool'},
+                    '55': {'key': 'z', 'desc': 'Zoom'},
+                    '60': {'key': '1', 'desc': 'Color 1'},
+                    '62': {'key': '2', 'desc': 'Color 2'},
+                    '64': {'key': 'd', 'desc': 'Default colors'},
+                    '65': {'key': 'x', 'desc': 'Swap colors'},
+                    '67': {'key': 'leftshift', 'desc': 'Modifier'},
+                    '72': {'key': 'leftbrace', 'desc': 'Decrease brush size'},
+                    '74': {'key': 'rightbrace', 'desc': 'Increase brush size'},
+                },
+                'midi_port': self.get_selected_port_index()
+            }
+            self.refresh_mappings_tree()
+            self.save_config()
+            messagebox.showinfo("Success", "Reset to default mappings")
+    
+    def export_config_for_daemon(self):
+        """Export configuration in daemon format"""
+        daemon_config = {
+            'mappings': {}
+        }
+        
+        if 'mappings' in self.current_mappings:
+            for note, mapping in self.current_mappings['mappings'].items():
+                daemon_config['mappings'][note] = mapping['key']
+        
+        export_path = self.config_file.parent / 'daemon_mappings.json'
+        with open(export_path, 'w') as f:
+            json.dump(daemon_config, f, indent=2)
+        
+        print(f"Exported daemon config to {export_path}")
+        return str(export_path)
+    
+    def on_closing(self):
+        """Handle application closing"""
+        self.stop_mapping()
+        self.root.destroy()
+
+def main():
+    # Check if running as root
+    if os.geteuid() == 0:
+        messagebox.showwarning("Root Warning", 
+                             "Running the GUI as root is not recommended.\n"
+                             "Please run as regular user and use sudo only for the daemon.")
+        return
+    
+    root = tk.Tk()
+    app = MidiMapperGUI(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
