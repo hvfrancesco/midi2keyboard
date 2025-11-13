@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MIDI to Keyboard Mapper with GUI - FIXED VERSION
-Wayland-compatible version with working mapping configuration
+MIDI to Keyboard Mapper with Key Combinations
+Supports complex key combinations like Ctrl+Z, Shift+Alt+A, etc.
 """
 
 import tkinter as tk
@@ -18,11 +18,11 @@ from pathlib import Path
 class MidiMapperGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("MIDI to Keyboard Mapper")
-        self.root.geometry("900x700")
+        self.root.title("MIDI to Keyboard Mapper - Key Combinations")
+        self.root.geometry("1000x800")
         
         # Configuration
-        self.config_file = Path.home() / '.config' / 'midi2keyboard' / 'mappings.json'
+        self.config_file = Path.home() / '.config' / 'midi2keyboard' / 'mappings_combos.json'
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         
         self.midi_ports = []
@@ -78,22 +78,22 @@ class MidiMapperGUI:
         test_btn.grid(row=0, column=2, padx=5)
         
         # Mappings frame
-        mappings_frame = ttk.LabelFrame(main_frame, text="MIDI to Keyboard Mappings", padding="10")
+        mappings_frame = ttk.LabelFrame(main_frame, text="MIDI to Keyboard Mappings (Supports Key Combinations)", padding="10")
         mappings_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
         mappings_frame.columnconfigure(1, weight=1)
         
         # Treeview for mappings
-        columns = ('midi_note', 'key_name', 'description')
-        self.mappings_tree = ttk.Treeview(mappings_frame, columns=columns, show='headings', height=15)
+        columns = ('midi_note', 'key_combination', 'description')
+        self.mappings_tree = ttk.Treeview(mappings_frame, columns=columns, show='headings', height=12)
         
         # Define headings
         self.mappings_tree.heading('midi_note', text='MIDI Note/CC')
-        self.mappings_tree.heading('key_name', text='Key Name')
+        self.mappings_tree.heading('key_combination', text='Key Combination')
         self.mappings_tree.heading('description', text='Description')
         
         # Define columns
         self.mappings_tree.column('midi_note', width=120)
-        self.mappings_tree.column('key_name', width=150)
+        self.mappings_tree.column('key_combination', width=200)
         self.mappings_tree.column('description', width=400)
         
         self.mappings_tree.grid(row=0, column=0, columnspan=4, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -103,31 +103,86 @@ class MidiMapperGUI:
         self.mappings_tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.grid(row=0, column=4, sticky=(tk.N, tk.S))
         
-        # Mapping controls
-        mapping_controls = ttk.Frame(mappings_frame)
-        mapping_controls.grid(row=1, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=10)
+        # Key combination builder
+        combo_frame = ttk.LabelFrame(mappings_frame, text="Key Combination Builder", padding="10")
+        combo_frame.grid(row=1, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=10)
         
-        ttk.Label(mapping_controls, text="MIDI Note/CC:").grid(row=0, column=0, padx=5)
+        # Modifier keys
+        mod_frame = ttk.Frame(combo_frame)
+        mod_frame.grid(row=0, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=5)
+        
+        ttk.Label(mod_frame, text="Modifiers:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        
+        self.ctrl_var = tk.BooleanVar()
+        ctrl_cb = ttk.Checkbutton(mod_frame, text="Ctrl", variable=self.ctrl_var)
+        ctrl_cb.grid(row=0, column=1, padx=5)
+        
+        self.shift_var = tk.BooleanVar()
+        shift_cb = ttk.Checkbutton(mod_frame, text="Shift", variable=self.shift_var)
+        shift_cb.grid(row=0, column=2, padx=5)
+        
+        self.alt_var = tk.BooleanVar()
+        alt_cb = ttk.Checkbutton(mod_frame, text="Alt", variable=self.alt_var)
+        alt_cb.grid(row=0, column=3, padx=5)
+        
+        self.super_var = tk.BooleanVar()
+        super_cb = ttk.Checkbutton(mod_frame, text="Super", variable=self.super_var)
+        super_cb.grid(row=0, column=4, padx=5)
+        
+        # Main key selection
+        key_frame = ttk.Frame(combo_frame)
+        key_frame.grid(row=1, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=5)
+        
+        ttk.Label(key_frame, text="Main Key:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.main_key_var = tk.StringVar()
+        self.main_key_combo = ttk.Combobox(key_frame, textvariable=self.main_key_var, width=20)
+        self.main_key_combo['values'] = self.get_available_keys()
+        self.main_key_combo.grid(row=0, column=1, padx=5)
+        
+        # Preview
+        ttk.Label(key_frame, text="Preview:").grid(row=0, column=2, padx=5)
+        self.preview_var = tk.StringVar(value="No keys selected")
+        preview_label = ttk.Label(key_frame, textvariable=self.preview_var, foreground="blue")
+        preview_label.grid(row=0, column=3, padx=5)
+        
+        # Update preview when anything changes
+        self.ctrl_var.trace('w', self.update_preview)
+        self.shift_var.trace('w', self.update_preview)
+        self.alt_var.trace('w', self.update_preview)
+        self.super_var.trace('w', self.update_preview)
+        self.main_key_var.trace('w', self.update_preview)
+        
+        # MIDI input and description
+        input_frame = ttk.Frame(combo_frame)
+        input_frame.grid(row=2, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=5)
+        
+        ttk.Label(input_frame, text="MIDI Note/CC:").grid(row=0, column=0, padx=5)
         self.new_note_var = tk.StringVar()
-        note_entry = ttk.Entry(mapping_controls, textvariable=self.new_note_var, width=10)
+        note_entry = ttk.Entry(input_frame, textvariable=self.new_note_var, width=10)
         note_entry.grid(row=0, column=1, padx=5)
         
-        ttk.Label(mapping_controls, text="Key:").grid(row=0, column=2, padx=5)
-        self.new_key_var = tk.StringVar()
-        self.key_combo = ttk.Combobox(mapping_controls, textvariable=self.new_key_var, width=15)
-        self.key_combo['values'] = self.get_available_keys()
-        self.key_combo.grid(row=0, column=3, padx=5)
-        
-        ttk.Label(mapping_controls, text="Description:").grid(row=0, column=4, padx=5)
+        ttk.Label(input_frame, text="Description:").grid(row=0, column=2, padx=5)
         self.new_desc_var = tk.StringVar()
-        desc_entry = ttk.Entry(mapping_controls, textvariable=self.new_desc_var, width=30)
-        desc_entry.grid(row=0, column=5, padx=5)
+        desc_entry = ttk.Entry(input_frame, textvariable=self.new_desc_var, width=30)
+        desc_entry.grid(row=0, column=3, padx=5)
         
-        add_btn = ttk.Button(mapping_controls, text="Add Mapping", command=self.add_mapping)
-        add_btn.grid(row=0, column=6, padx=5)
+        add_btn = ttk.Button(input_frame, text="Add Mapping", command=self.add_mapping)
+        add_btn.grid(row=0, column=4, padx=5)
         
-        remove_btn = ttk.Button(mapping_controls, text="Remove Selected", command=self.remove_mapping)
-        remove_btn.grid(row=0, column=7, padx=5)
+        remove_btn = ttk.Button(input_frame, text="Remove Selected", command=self.remove_mapping)
+        remove_btn.grid(row=0, column=5, padx=5)
+        
+        # Quick presets for common applications
+        presets_frame = ttk.LabelFrame(mappings_frame, text="Quick Presets", padding="10")
+        presets_frame.grid(row=2, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=10)
+        
+        # Krita presets
+        ttk.Button(presets_frame, text="Load Krita Presets", 
+                  command=self.load_krita_presets).grid(row=0, column=0, padx=5, pady=2)
+        ttk.Button(presets_frame, text="Load Inkscape Presets", 
+                  command=self.load_inkscape_presets).grid(row=0, column=1, padx=5, pady=2)
+        ttk.Button(presets_frame, text="Load Blender Presets", 
+                  command=self.load_blender_presets).grid(row=0, column=2, padx=5, pady=2)
         
         # File operations
         file_frame = ttk.Frame(main_frame)
@@ -157,11 +212,75 @@ class MidiMapperGUI:
             'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12',
             'space', 'tab', 'enter', 'backspace', 'escape',
             'left', 'right', 'up', 'down',
-            'leftshift', 'rightshift', 'leftctrl', 'rightctrl', 'leftalt', 'rightalt',
             'comma', 'period', 'slash', 'semicolon', 'apostrophe', 'backslash',
-            'leftbrace', 'rightbrace', 'equal', 'minus', 'grave'
+            'leftbrace', 'rightbrace', 'equal', 'minus', 'grave',
+            'pageup', 'pagedown', 'home', 'end', 'insert', 'delete'
         ]
         return common_keys
+    
+    def update_preview(self, *args):
+        """Update the key combination preview"""
+        modifiers = []
+        if self.ctrl_var.get():
+            modifiers.append("Ctrl")
+        if self.shift_var.get():
+            modifiers.append("Shift")
+        if self.alt_var.get():
+            modifiers.append("Alt")
+        if self.super_var.get():
+            modifiers.append("Super")
+        
+        main_key = self.main_key_var.get()
+        
+        if modifiers and main_key:
+            preview = "+".join(modifiers) + "+" + main_key.upper()
+        elif main_key:
+            preview = main_key.upper()
+        else:
+            preview = "No keys selected"
+        
+        self.preview_var.set(preview)
+    
+    def get_current_combination(self):
+        """Get the current key combination as a list"""
+        combination = []
+        if self.ctrl_var.get():
+            combination.append('leftctrl')
+        if self.shift_var.get():
+            combination.append('leftshift')
+        if self.alt_var.get():
+            combination.append('leftalt')
+        if self.super_var.get():
+            combination.append('leftmeta')
+        
+        main_key = self.main_key_var.get()
+        if main_key:
+            combination.append(main_key)
+        
+        return combination
+    
+    def set_combination_from_list(self, key_list):
+        """Set the UI from a key combination list"""
+        # Reset all modifiers
+        self.ctrl_var.set(False)
+        self.shift_var.set(False)
+        self.alt_var.set(False)
+        self.super_var.set(False)
+        self.main_key_var.set('')
+        
+        for key in key_list:
+            if key in ['leftctrl', 'ctrl']:
+                self.ctrl_var.set(True)
+            elif key in ['leftshift', 'shift']:
+                self.shift_var.set(True)
+            elif key in ['leftalt', 'alt']:
+                self.alt_var.set(True)
+            elif key in ['leftmeta', 'super', 'meta']:
+                self.super_var.set(True)
+            else:
+                self.main_key_var.set(key)
+        
+        self.update_preview()
     
     def refresh_midi_ports(self):
         """Refresh list of available MIDI ports"""
@@ -187,21 +306,21 @@ class MidiMapperGUI:
             filename = self.config_file
         
         if not os.path.exists(filename):
-            # Create default configuration
+            # Create default configuration with combinations
             self.current_mappings = {
                 'mappings': {
-                    '48': {'key': 'b', 'desc': 'Brush tool'},
-                    '50': {'key': 'e', 'desc': 'Eraser'},
-                    '52': {'key': 'v', 'desc': 'Select tool'},
-                    '53': {'key': 'm', 'desc': 'Move tool'},
-                    '55': {'key': 'z', 'desc': 'Zoom'},
-                    '60': {'key': '1', 'desc': 'Color 1'},
-                    '62': {'key': '2', 'desc': 'Color 2'},
-                    '64': {'key': 'd', 'desc': 'Default colors'},
-                    '65': {'key': 'x', 'desc': 'Swap colors'},
-                    '67': {'key': 'leftshift', 'desc': 'Modifier'},
-                    '72': {'key': 'leftbrace', 'desc': 'Decrease brush size'},
-                    '74': {'key': 'rightbrace', 'desc': 'Increase brush size'},
+                    '48': {'keys': ['b'], 'desc': 'Brush tool'},
+                    '50': {'keys': ['e'], 'desc': 'Eraser'},
+                    '52': {'keys': ['v'], 'desc': 'Select tool'},
+                    '53': {'keys': ['m'], 'desc': 'Move tool'},
+                    '55': {'keys': ['leftctrl', 'z'], 'desc': 'Undo'},
+                    '60': {'keys': ['leftctrl', 'shift', 'z'], 'desc': 'Redo'},
+                    '62': {'keys': ['leftctrl', 's'], 'desc': 'Save'},
+                    '64': {'keys': ['leftctrl', 'a'], 'desc': 'Select All'},
+                    '65': {'keys': ['leftctrl', 'c'], 'desc': 'Copy'},
+                    '67': {'keys': ['leftctrl', 'v'], 'desc': 'Paste'},
+                    '72': {'keys': ['leftbrace'], 'desc': 'Decrease brush size'},
+                    '74': {'keys': ['rightbrace'], 'desc': 'Increase brush size'},
                 },
                 'midi_port': 0
             }
@@ -235,22 +354,26 @@ class MidiMapperGUI:
         
         if 'mappings' in self.current_mappings:
             for note, mapping in self.current_mappings['mappings'].items():
+                # Format key combination for display
+                keys = mapping['keys']
+                display_keys = "+".join(k.upper() if len(k) > 1 else k for k in keys)
+                
                 self.mappings_tree.insert('', tk.END, values=(
-                    note, mapping['key'], mapping['desc']
+                    note, display_keys, mapping['desc']
                 ))
     
     def add_mapping(self):
         """Add a new mapping"""
         note = self.new_note_var.get().strip()
-        key = self.new_key_var.get().strip()
+        key_combination = self.get_current_combination()
         desc = self.new_desc_var.get().strip()
         
         if not note:
             messagebox.showwarning("Input Error", "Please enter a MIDI note/CC number")
             return
         
-        if not key:
-            messagebox.showwarning("Input Error", "Please select a key")
+        if not key_combination:
+            messagebox.showwarning("Input Error", "Please select at least one key")
             return
         
         # Validate MIDI note is a number
@@ -263,28 +386,23 @@ class MidiMapperGUI:
             messagebox.showwarning("Input Error", "MIDI note/CC must be a number")
             return
         
-        # Validate key is in available keys
-        if key not in self.get_available_keys():
-            messagebox.showwarning("Input Error", f"Invalid key: {key}")
-            return
-        
         if 'mappings' not in self.current_mappings:
             self.current_mappings['mappings'] = {}
         
         self.current_mappings['mappings'][note] = {
-            'key': key,
-            'desc': desc or f"MIDI {note} to {key}"
+            'keys': key_combination,
+            'desc': desc or f"MIDI {note} to {'+'.join(key_combination)}"
         }
         
         self.refresh_mappings_tree()
         self.new_note_var.set('')
-        self.new_key_var.set('')
         self.new_desc_var.set('')
+        # Don't clear the key combination - user might want to add another mapping with same combo
         
         # Auto-save configuration
         self.save_config()
         
-        print(f"Added mapping: MIDI {note} -> {key} ({desc})")
+        print(f"Added mapping: MIDI {note} -> {key_combination} ({desc})")
     
     def remove_mapping(self):
         """Remove selected mapping"""
@@ -311,8 +429,85 @@ class MidiMapperGUI:
             values = self.mappings_tree.item(item)['values']
             if values:
                 self.new_note_var.set(values[0])
-                self.new_key_var.set(values[1])
                 self.new_desc_var.set(values[2])
+                
+                # Parse the key combination back into the UI
+                note = values[0]
+                if note in self.current_mappings['mappings']:
+                    key_list = self.current_mappings['mappings'][note]['keys']
+                    self.set_combination_from_list(key_list)
+    
+    def load_krita_presets(self):
+        """Load Krita-specific presets"""
+        krita_presets = {
+            '36': {'keys': ['b'], 'desc': 'Brush Tool'},
+            '37': {'keys': ['e'], 'desc': 'Eraser Tool'},
+            '38': {'keys': ['m'], 'desc': 'Mirror View'},
+            '39': {'keys': ['r'], 'desc': 'Rotate Canvas'},
+            '40': {'keys': ['leftctrl', 'z'], 'desc': 'Undo'},
+            '41': {'keys': ['leftctrl', 'shift', 'z'], 'desc': 'Redo'},
+            '42': {'keys': ['leftctrl', 's'], 'desc': 'Save'},
+            '43': {'keys': ['leftbrace'], 'desc': 'Decrease Brush Size'},
+            '44': {'keys': ['rightbrace'], 'desc': 'Increase Brush Size'},
+            '45': {'keys': ['leftshift'], 'desc': 'Color Pick (Hold)'},
+            '46': {'keys': ['x'], 'desc': 'Swap Foreground/Background'},
+            '47': {'keys': ['d'], 'desc': 'Reset Colors'},
+            '48': {'keys': ['leftctrl', 'a'], 'desc': 'Select All'},
+            '49': {'keys': ['leftctrl', 'd'], 'desc': 'Deselect'},
+        }
+        
+        if messagebox.askyesno("Load Presets", "Load Krita presets? This will replace your current mappings."):
+            self.current_mappings['mappings'] = krita_presets
+            self.refresh_mappings_tree()
+            self.save_config()
+            messagebox.showinfo("Success", "Krita presets loaded!")
+    
+    def load_inkscape_presets(self):
+        """Load Inkscape-specific presets"""
+        inkscape_presets = {
+            '36': {'keys': ['f1'], 'desc': 'Selector Tool'},
+            '37': {'keys': ['f2'], 'desc': 'Edit Paths Tool'},
+            '38': {'keys': ['f5'], 'desc': 'Zoom Tool'},
+            '39': {'keys': ['f6'], 'desc': 'Rectangle Tool'},
+            '40': {'keys': ['leftctrl', 'z'], 'desc': 'Undo'},
+            '41': {'keys': ['leftctrl', 'shift', 'z'], 'desc': 'Redo'},
+            '42': {'keys': ['leftctrl', 's'], 'desc': 'Save'},
+            '43': {'keys': ['leftctrl', 'a'], 'desc': 'Select All'},
+            '44': {'keys': ['leftctrl', 'd'], 'desc': 'Duplicate'},
+            '45': {'keys': ['leftctrl', 'g'], 'desc': 'Group'},
+            '46': {'keys': ['leftctrl', 'shift', 'g'], 'desc': 'Ungroup'},
+            '47': {'keys': ['leftctrl', 'shift', 'c'], 'desc': 'Combine Paths'},
+            '48': {'keys': ['leftctrl', 'shift', 'b'], 'desc': 'Break Apart'},
+        }
+        
+        if messagebox.askyesno("Load Presets", "Load Inkscape presets? This will replace your current mappings."):
+            self.current_mappings['mappings'] = inkscape_presets
+            self.refresh_mappings_tree()
+            self.save_config()
+            messagebox.showinfo("Success", "Inkscape presets loaded!")
+    
+    def load_blender_presets(self):
+        """Load Blender-specific presets"""
+        blender_presets = {
+            '36': {'keys': ['tab'], 'desc': 'Toggle Edit Mode'},
+            '37': {'keys': ['g'], 'desc': 'Grab/Move'},
+            '38': {'keys': ['r'], 'desc': 'Rotate'},
+            '39': {'keys': ['s'], 'desc': 'Scale'},
+            '40': {'keys': ['leftctrl', 'z'], 'desc': 'Undo'},
+            '41': {'keys': ['leftctrl', 'shift', 'z'], 'desc': 'Redo'},
+            '42': {'keys': ['a'], 'desc': 'Select All'},
+            '43': {'keys': ['b'], 'desc': 'Box Select'},
+            '44': {'keys': ['c'], 'desc': 'Circle Select'},
+            '45': {'keys': ['x'], 'desc': 'Delete'},
+            '46': {'keys': ['leftshift', 'a'], 'desc': 'Add Menu'},
+            '47': {'keys': ['z'], 'desc': 'Toggle Wireframe'},
+        }
+        
+        if messagebox.askyesno("Load Presets", "Load Blender presets? This will replace your current mappings."):
+            self.current_mappings['mappings'] = blender_presets
+            self.refresh_mappings_tree()
+            self.save_config()
+            messagebox.showinfo("Success", "Blender presets loaded!")
     
     def get_selected_port_index(self):
         """Get the selected MIDI port index"""
@@ -437,25 +632,8 @@ class MidiMapperGUI:
     def reset_to_defaults(self):
         """Reset to default mappings"""
         if messagebox.askyesno("Confirm Reset", "Reset all mappings to defaults?"):
-            self.current_mappings = {
-                'mappings': {
-                    '48': {'key': 'b', 'desc': 'Brush tool'},
-                    '50': {'key': 'e', 'desc': 'Eraser'},
-                    '52': {'key': 'v', 'desc': 'Select tool'},
-                    '53': {'key': 'm', 'desc': 'Move tool'},
-                    '55': {'key': 'z', 'desc': 'Zoom'},
-                    '60': {'key': '1', 'desc': 'Color 1'},
-                    '62': {'key': '2', 'desc': 'Color 2'},
-                    '64': {'key': 'd', 'desc': 'Default colors'},
-                    '65': {'key': 'x', 'desc': 'Swap colors'},
-                    '67': {'key': 'leftshift', 'desc': 'Modifier'},
-                    '72': {'key': 'leftbrace', 'desc': 'Decrease brush size'},
-                    '74': {'key': 'rightbrace', 'desc': 'Increase brush size'},
-                },
-                'midi_port': self.get_selected_port_index()
-            }
+            self.load_config()  # This will reload defaults
             self.refresh_mappings_tree()
-            self.save_config()
             messagebox.showinfo("Success", "Reset to default mappings")
     
     def export_config_for_daemon(self):
@@ -466,9 +644,9 @@ class MidiMapperGUI:
         
         if 'mappings' in self.current_mappings:
             for note, mapping in self.current_mappings['mappings'].items():
-                daemon_config['mappings'][note] = mapping['key']
+                daemon_config['mappings'][note] = mapping['keys']
         
-        export_path = self.config_file.parent / 'daemon_mappings.json'
+        export_path = self.config_file.parent / 'daemon_mappings_combos.json'
         with open(export_path, 'w') as f:
             json.dump(daemon_config, f, indent=2)
         
