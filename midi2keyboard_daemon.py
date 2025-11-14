@@ -2,6 +2,9 @@
 """
 MIDI to Keyboard Daemon - Key Combinations
 Supports complex key combinations like Ctrl+Z, Shift+Alt+A, etc.
+
+Copyright (c) 2025 Francesco Fantoni (arto_at_arto.site)
+MIT License - https://opensource.org/licenses/MIT
 """
 
 import rtmidi
