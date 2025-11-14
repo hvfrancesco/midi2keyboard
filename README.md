@@ -1,93 +1,204 @@
-# midi2keyboard
+# MIDI to Keyboard Mapper
 
+A powerful Linux application that maps MIDI controller inputs to keyboard shortcuts and key combinations. Perfect for controlling creative applications like Krita, Inkscape, and Blender with a MIDI controller.
 
+![Platform](https://img.shields.io/badge/Platform-Linux-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.6+-green.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-## Getting started
+## Features
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- 🎹 **MIDI Controller Support** - Works with any MIDI controller or keyboard
+- ⌨️ **Key Combinations** - Map to complex shortcuts like Ctrl+Z, Shift+Alt+A, etc.
+- 🎨 **Application Presets** - Pre-configured mappings for Krita, Inkscape, and Blender
+- 🖥️ **Graphical Interface** - Easy-to-use GUI for mapping configuration
+- 🐧 **Wayland Compatible** - Works on both X11 and Wayland displays
+- 🔧 **Real-time Configuration** - Change mappings without restarting
+- 💾 **Profile Management** - Save and load different mapping configurations
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Use Cases
 
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.com/hv_francesco/midi2keyboard.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.com/hv_francesco/midi2keyboard/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- **Digital Art** - Use MIDI pads for brush shortcuts in Krita
+- **Vector Graphics** - Map tools and actions in Inkscape
+- **3D Modeling** - Control viewport and tools in Blender
+- **Video Editing** - Create custom shortcuts for DaVinci Resolve, Kdenlive
+- **Music Production** - Additional controller support for DAWs
+- **Any Application** - Custom mappings for your workflow
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+
+### Prerequisites
+
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install python3-pip python3-tk libasound2-dev
+
+# Fedora
+sudo dnf install python3-pip python3-tkinter alsa-lib-devel
+
+# Arch Linux
+sudo pacman -S python-pip tk alsa-lib
+```
+
+### Install dependencies
+```bash
+pip3 install python-rtmidi evdev
+```
+
+## Download and run
+```bash
+# Clone or download the project files
+git clone <repository-url>
+cd midi2keyboard
+
+# Make scripts executable
+chmod +x midi2keyboard.py
+chmod +x midi2keyboard_daemon.py
+
+# Run the application
+python3 midi2keyboard.py
+```
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Basic Setup
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+1. **Connect your MIDI controller** to your computer
+2. **Run the application**: `python3 midi2keyboard.py`
+3. **Select your MIDI port** from the dropdown menu
+4. **Create mappings** using the key combination builder
+5. **Click "Start Mapping"** to begin (will prompt for admin password)
+
+### Creating Mappings
+
+1. **Check modifier keys** (Ctrl, Shift, Alt, Super) as needed
+2. **Select a main key** from the dropdown
+3. **Enter MIDI note/CC number** (0-127)
+4. **Add description** (optional)
+5. **Click "Add Mapping"**
+
+### Example Mappings
+
+| MIDI Note | Key Combination | Description |
+|-----------|-----------------|-------------|
+| 36 | `B` | Brush tool |
+| 37 | `E` | Eraser tool |
+| 40 | `Ctrl+Z` | Undo |
+| 41 | `Ctrl+Shift+Z` | Redo |
+| 42 | `Ctrl+S` | Save |
+| 43 | `[` | Decrease brush size |
+| 44 | `]` | Increase brush size |
+
+### Application Presets
+
+The application includes ready-to-use presets for popular creative software:
+
+- **Krita Preset** - Digital painting shortcuts
+- **Inkscape Preset** - Vector graphics tools
+- **Blender Preset** - 3D modeling commands
+
+Click the preset buttons to load these configurations instantly.
+
+## Configuration Files
+### User Configuration
+~/.config/midi2keyboard/mappings.json
+
+```json
+{
+  "mappings": {
+    "36": {"keys": ["b"], "desc": "Brush Tool"},
+    "40": {"keys": ["leftctrl", "z"], "desc": "Undo"}
+  },
+  "midi_port": 0
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**"No MIDI ports found"**
+- Ensure your MIDI controller is connected and powered on
+- Check if it appears in `arecord -l` output
+- Try different USB ports
+
+**"Permission denied" when starting mapping**
+- The daemon requires root privileges for uinput access
+- The GUI uses `pkexec` to request privileges automatically
+
+**Key combinations not working**
+- Ensure the target application has focus
+- Try simpler combinations first
+- Check if the application uses different shortcut modifiers
+
+**"Operation not permitted" when stopping**
+- Use the built-in stop button in the GUI
+- If needed, manually stop with: `sudo pkill -f midi2keyboard_daemon.py`
+
+## Manual Daemon Control
+
+```bash
+# Start daemon manually
+sudo python3 midi2keyboard_daemon.py -c config.json -p 0
+
+# Stop daemon manually
+sudo pkill -f midi2keyboard_daemon.py
+
+# Emergency stop
+sudo killall python3
+```
+
+## Supported Keys
+
+The application supports all standard keyboard keys including:
+
+- **Letters**: A-Z
+- **Numbers**: 0-9
+- **Function keys**: F1-F12
+- **Modifiers**: Ctrl, Shift, Alt, Super (Windows/Command)
+- **Navigation**: Arrow keys, Home, End, Page Up/Down
+- **Special**: Space, Enter, Tab, Escape, Backspace
+- **Symbols**: [, ], {, }, ,, ., /, ;, ', \, =, -, `
+
+## Technical Details
+
+- **MIDI Handling**: Uses `python-rtmidi` for robust MIDI input
+- **Keyboard Simulation**: Uses `evdev` for Wayland-compatible input injection
+- **GUI**: Built with Tkinter for cross-distribution compatibility
+- **Privilege Separation**: GUI runs as user, daemon runs with elevated privileges
+
+## Security Notes
+
+- The daemon requires root privileges to simulate keyboard input
+- No data is sent over the network
+- Configuration files are stored locally
+- The application only reads MIDI input and writes keyboard events
 
 ## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Contributions are welcome! Please feel free to submit pull requests for:
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- New application presets
+- Bug fixes
+- Feature enhancements
+- Documentation improvements
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Built with [python-rtmidi](https://github.com/SpotlightKid/python-rtmidi) for MIDI support
+- Uses [python-evdev](https://github.com/gvalkov/python-evdev) for input simulation
+- Inspired by the need for better controller support in creative applications
+
+## Support
+
+If you encounter issues or have questions:
+
+1. Check the troubleshooting section above
+2. Ensure your system meets the prerequisites
+3. Verify your MIDI controller is properly detected
+4. Create an issue on the project repository with details about your setup

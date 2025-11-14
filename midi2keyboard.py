@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import signal
 from pathlib import Path
 
 class MidiMapperGUI:
@@ -22,13 +23,14 @@ class MidiMapperGUI:
         self.root.geometry("1000x800")
         
         # Configuration
-        self.config_file = Path.home() / '.config' / 'midi2keyboard' / 'mappings_combos.json'
+        self.config_file = Path.home() / '.config' / 'midi2keyboard' / 'mappings.json'
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         
         self.midi_ports = []
         self.current_mappings = {}
         self.midi_in = None
         self.mapping_process = None
+        self.daemon_pid_file = Path.home() / '.config' / 'midi2keyboard' / 'daemon.pid'
         
         # Load existing configuration
         self.load_config()
@@ -38,6 +40,38 @@ class MidiMapperGUI:
         
         # Bind close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Check if daemon is already running
+        self.check_daemon_status()
+    
+    def check_daemon_status(self):
+        """Check if daemon is already running and update UI accordingly"""
+        if self.is_daemon_running():
+            self.status_var.set("Mapping active (daemon running)")
+            self.start_btn.config(state='disabled')
+            self.stop_btn.config(state='normal')
+    
+    def is_daemon_running(self):
+        """Check if daemon process is running"""
+        if self.daemon_pid_file.exists():
+            try:
+                with open(self.daemon_pid_file, 'r') as f:
+                    pid = int(f.read().strip())
+                # Check if process exists
+                os.kill(pid, 0)
+                return True
+            except (OSError, ValueError):
+                # PID file exists but process is dead
+                self.cleanup_pid_file()
+        return False
+    
+    def cleanup_pid_file(self):
+        """Remove stale PID file"""
+        try:
+            if self.daemon_pid_file.exists():
+                self.daemon_pid_file.unlink()
+        except:
+            pass
     
     def setup_gui(self):
         """Setup the main GUI"""
@@ -408,18 +442,38 @@ class MidiMapperGUI:
         """Remove selected mapping"""
         selected = self.mappings_tree.selection()
         if not selected:
-            messagebox.showwarning("Selection Error", "Please select a mapping to remove")
+            messagebox.showwarning("Selection Error", "Please select one or more mappings to remove")
             return
         
+        # Confirm deletion
+        if not messagebox.askyesno("Confirm Delete", 
+                                f"Are you sure you want to remove {len(selected)} mapping(s)?"):
+            return
+        
+        # Get all selected items and their MIDI note values
+        notes_to_remove = []
         for item in selected:
             values = self.mappings_tree.item(item)['values']
-            if values and values[0] in self.current_mappings.get('mappings', {}):
-                note = values[0]
-                del self.current_mappings['mappings'][note]
-                print(f"Removed mapping for MIDI note {note}")
+            if values and len(values) > 0:
+                note = str(values[0])  # Convert to string to match JSON keys
+                notes_to_remove.append(note)
         
-        self.refresh_mappings_tree()
-        self.save_config()
+        # Remove from current_mappings
+        removed_count = 0
+        if 'mappings' in self.current_mappings:
+            for note in notes_to_remove:
+                if note in self.current_mappings['mappings']:
+                    del self.current_mappings['mappings'][note]
+                    removed_count += 1
+                    print(f"Removed mapping for MIDI note {note}")
+        
+        # Update the UI and save
+        if removed_count > 0:
+            self.refresh_mappings_tree()
+            self.save_config()
+            messagebox.showinfo("Success", f"Removed {removed_count} mapping(s)")
+        else:
+            messagebox.showwarning("Remove Error", "No mappings were found to remove")
     
     def on_mapping_double_click(self, event):
         """Edit mapping on double click"""
@@ -556,18 +610,31 @@ class MidiMapperGUI:
     
     def stop_mapping(self):
         """Stop the MIDI to keyboard mapping"""
-        if self.mapping_process:
-            self.mapping_process.terminate()
-            try:
-                self.mapping_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.mapping_process.kill()
-            self.mapping_process = None
-        
-        self.status_var.set("Not running")
-        self.start_btn.config(state='normal')
-        self.stop_btn.config(state='disabled')
-        print("Mapping stopped")
+        # Use sudo to kill the daemon process
+        try:
+            # Method 1: Try to find and kill the daemon process
+            kill_cmd = ['pkexec', 'pkill', '-f', 'midi2keyboard_daemon.py']
+            subprocess.run(kill_cmd, timeout=10)
+            
+            # Method 2: If pkill doesn't work, try with sudo killall
+            time.sleep(1)
+            if self.is_daemon_running():
+                kill_cmd = ['pkexec', 'killall', '-9', 'python3']
+                subprocess.run(kill_cmd, timeout=5)
+            
+            # Clean up PID file
+            self.cleanup_pid_file()
+            
+            self.status_var.set("Not running")
+            self.start_btn.config(state='normal')
+            self.stop_btn.config(state='disabled')
+            print("Mapping stopped")
+            
+        except subprocess.TimeoutExpired:
+            messagebox.showerror("Error", "Timeout trying to stop daemon")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to stop mapping: {e}")
+            print(f"Error stopping daemon: {e}")
     
     def test_midi_input(self):
         """Test MIDI input from selected port"""
@@ -646,7 +713,7 @@ class MidiMapperGUI:
             for note, mapping in self.current_mappings['mappings'].items():
                 daemon_config['mappings'][note] = mapping['keys']
         
-        export_path = self.config_file.parent / 'daemon_mappings_combos.json'
+        export_path = self.config_file.parent / 'daemon_mappings.json'
         with open(export_path, 'w') as f:
             json.dump(daemon_config, f, indent=2)
         
@@ -655,7 +722,9 @@ class MidiMapperGUI:
     
     def on_closing(self):
         """Handle application closing"""
-        self.stop_mapping()
+        # Only try to stop mapping if it's actually running
+        if self.is_daemon_running():
+            self.stop_mapping()
         self.root.destroy()
 
 def main():
