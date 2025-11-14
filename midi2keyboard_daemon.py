@@ -34,28 +34,82 @@ class WaylandMidiMapper:
                     # Convert string key names to evdev key codes
                     for midi_note, key_list in config['mappings'].items():
                         key_codes = []
+                        key_names = []
                         for key_name in key_list:
-                            key_code = getattr(e, f"KEY_{key_name.upper()}", None)
-                            if key_code:
+                            key_code = self.get_key_code(key_name)
+                            if key_code is not None:
                                 key_codes.append(key_code)
+                                key_names.append(key_name)
                             else:
                                 print(f"Warning: Unknown key name '{key_name}' for MIDI note {midi_note}")
                         
                         if key_codes:
                             self.key_mappings[int(midi_note)] = key_codes
-                            key_names = [self.get_key_name(kc) for kc in key_codes]
                             print(f"Loaded mapping: MIDI {midi_note} -> {key_names}")
                 print(f"Configuration loaded from {self.config_file}")
         except Exception as ex:
             print(f"Error loading config: {ex}")
             sys.exit(1)
     
+    def get_key_code(self, key_name):
+        """Get the key code from key name"""
+        # Handle modifier keys with common aliases
+        key_aliases = {
+            'ctrl': 'leftctrl',
+            'control': 'leftctrl',
+            'shift': 'leftshift',
+            'alt': 'leftalt',
+            'super': 'leftmeta',
+            'meta': 'leftmeta',
+            'windows': 'leftmeta',
+            'cmd': 'leftmeta',
+        }
+        
+        # Normalize key name
+        normalized_name = key_aliases.get(key_name.lower(), key_name.lower())
+        
+        # Try to find the key code
+        key_attr = f"KEY_{normalized_name.upper()}"
+        if hasattr(e, key_attr):
+            return getattr(e, key_attr)
+        
+        # If not found, try some common variations
+        if normalized_name in ['leftbrace', '[']:
+            return e.KEY_LEFTBRACE
+        elif normalized_name in ['rightbrace', ']']:
+            return e.KEY_RIGHTBRACE
+        elif normalized_name in ['comma', ',']:
+            return e.KEY_COMMA
+        elif normalized_name in ['period', '.']:
+            return e.KEY_DOT
+        elif normalized_name in ['slash', '/']:
+            return e.KEY_SLASH
+        elif normalized_name in ['semicolon', ';']:
+            return e.KEY_SEMICOLON
+        elif normalized_name in ['apostrophe', "'"]:
+            return e.KEY_APOSTROPHE
+        elif normalized_name in ['backslash', '\\']:
+            return e.KEY_BACKSLASH
+        elif normalized_name in ['equal', '=']:
+            return e.KEY_EQUAL
+        elif normalized_name in ['minus', '-']:
+            return e.KEY_MINUS
+        elif normalized_name in ['grave', '`']:
+            return e.KEY_GRAVE
+        
+        return None
+    
     def get_key_name(self, key_code):
         """Get the name of a key from its key code"""
-        for name, code in e.keys.items():
-            if code == key_code:
-                return name
-        return f"UNKNOWN({key_code})"
+        # Create a reverse mapping of key codes to names
+        if not hasattr(self, '_key_code_map'):
+            self._key_code_map = {}
+            for name in dir(e):
+                if name.startswith('KEY_'):
+                    code = getattr(e, name)
+                    self._key_code_map[code] = name[4:].lower()  # Remove 'KEY_' prefix
+        
+        return self._key_code_map.get(key_code, f"UNKNOWN({key_code})")
     
     def setup_uinput(self):
         """Setup uinput device for Wayland compatibility"""
@@ -245,7 +299,7 @@ def main():
     # Check if running as root
     if os.geteuid() != 0:
         print("Error: This daemon requires root privileges to simulate keyboard input.")
-        print("Please run through the GUI or use: sudo python3 midi2keyboard_daemon_combos.py -c config.json -p PORT")
+        print("Please run through the GUI or use: sudo python3 midi2keyboard_daemon.py -c config.json -p PORT")
         sys.exit(1)
     
     if not os.path.exists(args.config):
