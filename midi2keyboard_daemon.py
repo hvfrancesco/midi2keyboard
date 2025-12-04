@@ -7,6 +7,7 @@ Copyright (c) 2025 Francesco Fantoni (arto_at_arto.site)
 MIT License - https://opensource.org/licenses/MIT
 """
 
+
 import rtmidi
 import time
 import json
@@ -14,6 +15,7 @@ import argparse
 import os
 import sys
 from evdev import UInput, ecodes as e
+import math
 
 class WaylandMidiMapper:
     def __init__(self, config_file, port=0):
@@ -22,8 +24,12 @@ class WaylandMidiMapper:
         self.midi_in = rtmidi.MidiIn()
         self.ui = None
         self.running = False
-        self.active_notes = {}  # note -> list of key_codes that are currently pressed
-        self.key_mappings = {}  # note -> list of key_codes to press
+        self.active_notes = {}
+        self.active_cc = {}
+        self.key_mappings = {}
+        self.cc_mappings = {}
+        self.cc_last_values = {}
+        self.cc_last_event_time = {}
         
         self.load_config()
         self.setup_uinput()
@@ -34,29 +40,81 @@ class WaylandMidiMapper:
             with open(self.config_file, 'r') as f:
                 config = json.load(f)
                 if 'mappings' in config:
-                    # Convert string key names to evdev key codes
-                    for midi_note, key_list in config['mappings'].items():
-                        key_codes = []
-                        key_names = []
-                        for key_name in key_list:
-                            key_code = self.get_key_code(key_name)
-                            if key_code is not None:
-                                key_codes.append(key_code)
-                                key_names.append(key_name)
+                    for midi_id, mapping in config['mappings'].items():
+                        try:
+                            midi_num = int(midi_id)
+                            map_type = mapping.get('type', 'key')
+                            
+                            if map_type == 'key':
+                                # Key mapping
+                                key_codes = []
+                                for key_name in mapping.get('keys', []):
+                                    key_code = self.get_key_code(key_name)
+                                    if key_code is not None:
+                                        key_codes.append(key_code)
+                                    else:
+                                        print(f"Warning: Unknown key name '{key_name}' for MIDI {midi_num}")
+                                
+                                if key_codes:
+                                    self.key_mappings[midi_num] = {
+                                        'type': 'key',
+                                        'key_codes': key_codes,
+                                        'desc': mapping.get('desc', '')
+                                    }
+                                    print(f"Loaded key mapping: MIDI {midi_num} -> {[self.get_key_name(kc) for kc in key_codes]}")
+                            
                             else:
-                                print(f"Warning: Unknown key name '{key_name}' for MIDI note {midi_note}")
+                                # CC mapping - store the entire mapping
+                                self.cc_mappings[midi_num] = mapping
+                                # Make sure keys are converted to key codes if present
+                                if 'keys' in mapping:
+                                    key_codes = []
+                                    for key_name in mapping.get('keys', []):
+                                        key_code = self.get_key_code(key_name)
+                                        if key_code is not None:
+                                            key_codes.append(key_code)
+                                    if key_codes:
+                                        mapping['key_codes'] = key_codes
+                                
+                                print(f"Loaded CC mapping: CC {midi_num} -> {map_type} ({mapping.get('desc', '')})")
                         
-                        if key_codes:
-                            self.key_mappings[int(midi_note)] = key_codes
-                            print(f"Loaded mapping: MIDI {midi_note} -> {key_names}")
+                        except ValueError:
+                            print(f"Warning: Invalid MIDI number '{midi_id}'")
+                
                 print(f"Configuration loaded from {self.config_file}")
+        
         except Exception as ex:
             print(f"Error loading config: {ex}")
             sys.exit(1)
     
+    def setup_uinput(self):
+        """Setup uinput device with keyboard and mouse capabilities"""
+        # Keyboard capabilities
+        key_capabilities = list(e.keys.keys())
+        
+        # Mouse capabilities
+        rel_capabilities = [
+            e.REL_X, e.REL_Y,           # Mouse movement
+            e.REL_WHEEL, e.REL_HWHEEL,  # Mouse wheel
+            e.REL_WHEEL_HI_RES, e.REL_HWHEEL_HI_RES  # High-res wheel
+        ]
+        
+        # Button capabilities
+        btn_capabilities = [
+            e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE,  # Mouse buttons
+            e.BTN_SIDE, e.BTN_EXTRA,                # Extra mouse buttons
+        ]
+        
+        capabilities = {
+            e.EV_KEY: key_capabilities,
+            e.EV_REL: rel_capabilities,
+        }
+        
+        self.ui = UInput(capabilities, name='midi2keyboard-virtual-device')
+        print("Virtual input device created with keyboard and mouse capabilities")
+    
     def get_key_code(self, key_name):
         """Get the key code from key name"""
-        # Handle modifier keys with common aliases
         key_aliases = {
             'ctrl': 'leftctrl',
             'control': 'leftctrl',
@@ -68,128 +126,196 @@ class WaylandMidiMapper:
             'cmd': 'leftmeta',
         }
         
-        # Normalize key name
         normalized_name = key_aliases.get(key_name.lower(), key_name.lower())
-        
-        # Try to find the key code
         key_attr = f"KEY_{normalized_name.upper()}"
+        
         if hasattr(e, key_attr):
             return getattr(e, key_attr)
         
-        # If not found, try some common variations
-        if normalized_name in ['leftbrace', '[']:
-            return e.KEY_LEFTBRACE
-        elif normalized_name in ['rightbrace', ']']:
-            return e.KEY_RIGHTBRACE
-        elif normalized_name in ['comma', ',']:
-            return e.KEY_COMMA
-        elif normalized_name in ['period', '.']:
-            return e.KEY_DOT
-        elif normalized_name in ['slash', '/']:
-            return e.KEY_SLASH
-        elif normalized_name in ['semicolon', ';']:
-            return e.KEY_SEMICOLON
-        elif normalized_name in ['apostrophe', "'"]:
-            return e.KEY_APOSTROPHE
-        elif normalized_name in ['backslash', '\\']:
-            return e.KEY_BACKSLASH
-        elif normalized_name in ['equal', '=']:
-            return e.KEY_EQUAL
-        elif normalized_name in ['minus', '-']:
-            return e.KEY_MINUS
-        elif normalized_name in ['grave', '`']:
-            return e.KEY_GRAVE
+        # Special cases
+        special_cases = {
+            'leftbrace': e.KEY_LEFTBRACE,
+            'rightbrace': e.KEY_RIGHTBRACE,
+            'comma': e.KEY_COMMA,
+            'period': e.KEY_DOT,
+            'slash': e.KEY_SLASH,
+            'semicolon': e.KEY_SEMICOLON,
+            'apostrophe': e.KEY_APOSTROPHE,
+            'backslash': e.KEY_BACKSLASH,
+            'equal': e.KEY_EQUAL,
+            'minus': e.KEY_MINUS,
+            'grave': e.KEY_GRAVE,
+        }
         
-        return None
+        return special_cases.get(normalized_name)
     
     def get_key_name(self, key_code):
         """Get the name of a key from its key code"""
-        # Create a reverse mapping of key codes to names
         if not hasattr(self, '_key_code_map'):
             self._key_code_map = {}
             for name in dir(e):
                 if name.startswith('KEY_'):
                     code = getattr(e, name)
-                    self._key_code_map[code] = name[4:].lower()  # Remove 'KEY_' prefix
+                    self._key_code_map[code] = name[4:].lower()
         
         return self._key_code_map.get(key_code, f"UNKNOWN({key_code})")
     
-    def setup_uinput(self):
-        """Setup uinput device for Wayland compatibility"""
-        # Include all possible key types to ensure compatibility
-        capabilities = {
-            e.EV_KEY: list(e.keys.keys())
-        }
-        self.ui = UInput(capabilities, name='midi2keyboard-virtual-device')
-        print("Virtual input device created")
-    
     def press_key_combination(self, key_codes):
         """Press a combination of keys"""
-        # Press all keys in the combination
         for key_code in key_codes:
             self.ui.write(e.EV_KEY, key_code, 1)
-            print(f"  Key PRESSED: {self.get_key_name(key_code)}")
         
         self.ui.syn()
-        
-        # Small delay to ensure the combination is registered
         time.sleep(0.05)
         
-        # Release all keys in reverse order (common practice)
         for key_code in reversed(key_codes):
             self.ui.write(e.EV_KEY, key_code, 0)
-            print(f"  Key RELEASED: {self.get_key_name(key_code)}")
         
         self.ui.syn()
     
     def note_on_handler(self, note, velocity):
         """Handle MIDI note-on events"""
         if note in self.key_mappings:
-            key_codes = self.key_mappings[note]
-            
-            print(f"Note {note} (velocity {velocity}) -> Key combination: {[self.get_key_name(kc) for kc in key_codes]}")
-            
-            # Press and release the key combination
-            self.press_key_combination(key_codes)
-            
-            self.active_notes[note] = key_codes
+            mapping = self.key_mappings[note]
+            if mapping['type'] == 'key':
+                key_codes = mapping['key_codes']
+                print(f"Note {note} -> Key combination: {[self.get_key_name(kc) for kc in key_codes]}")
+                self.press_key_combination(key_codes)
+                self.active_notes[note] = key_codes
         else:
             print(f"Note {note} pressed but no mapping found")
     
     def note_off_handler(self, note):
         """Handle MIDI note-off events"""
         if note in self.active_notes:
-            # For key combinations, we've already released the keys in press_key_combination
-            # But we still track the note as active until note_off
             del self.active_notes[note]
-            print(f"Note {note} -> Key combination released")
     
     def control_change_handler(self, control, value):
-        """Handle MIDI control change events"""
-        if control in self.key_mappings:
-            key_codes = self.key_mappings[control]
-            # For CC, we can make it toggle or hold based on value
-            if value >= 64:  # On threshold
-                if control not in self.active_notes:
-                    # Press and hold the combination
-                    for key_code in key_codes:
-                        self.ui.write(e.EV_KEY, key_code, 1)
-                    self.ui.syn()
-                    self.active_notes[control] = key_codes
-                    key_names = [self.get_key_name(kc) for kc in key_codes]
-                    print(f"CC {control} (value {value}) -> Key combination PRESSED: {key_names}")
-            else:  # Off threshold
-                if control in self.active_notes:
-                    # Release the combination
-                    key_codes = self.active_notes[control]
-                    for key_code in reversed(key_codes):
-                        self.ui.write(e.EV_KEY, key_code, 0)
-                    self.ui.syn()
-                    del self.active_notes[control]
-                    key_names = [self.get_key_name(kc) for kc in key_codes]
-                    print(f"CC {control} (value {value}) -> Key combination RELEASED: {key_names}")
+        """Handle MIDI control change events with various mapping types"""
+        if control in self.cc_mappings:
+            mapping = self.cc_mappings[control]
+            map_type = mapping.get('type', 'toggle')
+            
+            if map_type == 'toggle':
+                self.handle_cc_toggle(control, value, mapping)
+            
+            elif map_type == 'key':
+                self.handle_cc_key(control, value, mapping)
+            
+            elif map_type == 'slider':
+                self.handle_cc_slider(control, value, mapping)
+            
+            elif map_type == 'mouse_wheel':
+                self.handle_cc_mouse_wheel(control, value, mapping)
+        
         else:
             print(f"CC {control} changed to {value} but no mapping found")
+    
+    def handle_cc_toggle(self, control, value, mapping):
+        """Handle CC as toggle (on/off at threshold)"""
+        threshold = mapping.get('threshold', 64)
+        key_codes = mapping.get('key_codes', [])
+        
+        if value >= threshold:
+            if control not in self.active_cc:
+                # Press and hold
+                for key_code in key_codes:
+                    self.ui.write(e.EV_KEY, key_code, 1)
+                self.ui.syn()
+                self.active_cc[control] = key_codes
+                print(f"CC {control} (value {value}) -> TOGGLE ON")
+        else:
+            if control in self.active_cc:
+                # Release
+                for key_code in reversed(self.active_cc[control]):
+                    self.ui.write(e.EV_KEY, key_code, 0)
+                self.ui.syn()
+                del self.active_cc[control]
+                print(f"CC {control} (value {value}) -> TOGGLE OFF")
+    
+    def handle_cc_key(self, control, value, mapping):
+        """Handle CC as key press (press on threshold crossing)"""
+        threshold = mapping.get('threshold', 64)
+        key_codes = mapping.get('key_codes', [])
+        
+        last_value = self.cc_last_values.get(control, 0)
+        
+        # Check if we crossed the threshold
+        if last_value < threshold <= value:
+            print(f"CC {control} crossed threshold up -> Key press")
+            self.press_key_combination(key_codes)
+        
+        elif last_value >= threshold > value:
+            print(f"CC {control} crossed threshold down -> Key press")
+            self.press_key_combination(key_codes)
+        
+        self.cc_last_values[control] = value
+    
+    def handle_cc_slider(self, control, value, mapping):
+        """Handle CC as slider (repeated key presses based on value)"""
+        threshold = mapping.get('threshold', 64)
+        key_codes = mapping.get('key_codes', [])
+        repeat_rate = mapping.get('repeat_rate', 0)
+        
+        last_value = self.cc_last_values.get(control, 64)
+        last_time = self.cc_last_event_time.get(control, 0)
+        
+        # Calculate direction and amount
+        if value > last_value:
+            direction = "up"
+            amount = value - last_value
+        elif value < last_value:
+            direction = "down"
+            amount = last_value - value
+        else:
+            return  # No change
+        
+        current_time = time.time()
+        
+        # Apply repeat rate if specified
+        if repeat_rate > 0 and (current_time - last_time) < (1.0 / repeat_rate):
+            return  # Too soon for next event
+        
+        # Press keys based on amount (scaled)
+        if amount > 5:  # Significant change
+            print(f"CC {control} slider: {direction} (value: {value}, change: {amount})")
+            self.press_key_combination(key_codes)
+        
+        self.cc_last_values[control] = value
+        self.cc_last_event_time[control] = current_time
+    
+    def handle_cc_mouse_wheel(self, control, value, mapping):
+        """Handle CC as mouse wheel"""
+        last_value = self.cc_last_values.get(control, 64)
+        wheel_dir = mapping.get('wheel_dir', 'vertical')
+        
+        # Calculate wheel movement
+        diff = value - last_value
+        
+        if diff > 0:
+            # Wheel up/right
+            if wheel_dir == 'vertical':
+                self.ui.write(e.EV_REL, e.REL_WHEEL, 1)
+                self.ui.write(e.EV_REL, e.REL_WHEEL_HI_RES, 120)
+                print(f"CC {control} -> Mouse wheel UP ({diff})")
+            else:
+                self.ui.write(e.EV_REL, e.REL_HWHEEL, 1)
+                self.ui.write(e.EV_REL, e.REL_HWHEEL_HI_RES, 120)
+                print(f"CC {control} -> Mouse wheel RIGHT ({diff})")
+        
+        elif diff < 0:
+            # Wheel down/left
+            if wheel_dir == 'vertical':
+                self.ui.write(e.EV_REL, e.REL_WHEEL, -1)
+                self.ui.write(e.EV_REL, e.REL_WHEEL_HI_RES, -120)
+                print(f"CC {control} -> Mouse wheel DOWN ({abs(diff)})")
+            else:
+                self.ui.write(e.EV_REL, e.REL_HWHEEL, -1)
+                self.ui.write(e.EV_REL, e.REL_HWHEEL_HI_RES, -120)
+                print(f"CC {control} -> Mouse wheel LEFT ({abs(diff)})")
+        
+        self.ui.syn()
+        self.cc_last_values[control] = value
     
     def midi_callback(self, event, data=None):
         """Callback for MIDI input"""
@@ -200,7 +326,7 @@ class WaylandMidiMapper:
             note, velocity = message[1], message[2]
             if velocity > 0:
                 self.note_on_handler(note, velocity)
-            else:  # Note On with velocity 0 treated as Note Off
+            else:
                 self.note_off_handler(note)
                 
         elif message_type == 0x80:  # Note Off
@@ -210,39 +336,14 @@ class WaylandMidiMapper:
         elif message_type == 0xB0:  # Control Change
             control, value = message[1], message[2]
             self.control_change_handler(control, value)
-        
-        elif message_type == 0xA0:  # Aftertouch
-            note, value = message[1], message[2]
-            print(f"Aftertouch: note {note}, value {value}")
-        
-        elif message_type == 0xD0:  # Channel Pressure
-            value = message[1]
-            print(f"Channel Pressure: value {value}")
-        
-        elif message_type == 0xE0:  # Pitch Bend
-            lsb, msb = message[1], message[2]
-            value = (msb << 7) | lsb
-            print(f"Pitch Bend: value {value}")
-    
-    def list_ports(self):
-        """List available MIDI ports"""
-        ports = self.midi_in.get_ports()
-        if not ports:
-            print("No MIDI input ports found!")
-            return []
-        
-        print("Available MIDI ports:")
-        for i, port in enumerate(ports):
-            print(f"  {i}: {port}")
-        return ports
     
     def start(self):
         """Start the MIDI mapper"""
-        ports = self.list_ports()
+        ports = self.midi_in.get_ports()
         if not ports:
+            print("No MIDI input ports found!")
             return False
         
-        # Use the specified port
         port_number = self.midi_port
         if port_number >= len(ports):
             print(f"Error: Requested port {port_number} not available. Only {len(ports)} ports found.")
@@ -257,12 +358,22 @@ class WaylandMidiMapper:
             self.running = True
             
             print(f"Successfully connected to MIDI port: {ports[port_number]}")
-            print("MIDI to Keyboard mapper with key combinations started!")
-            print("Active mappings:")
-            for note, key_codes in self.key_mappings.items():
-                key_names = [self.get_key_name(kc) for kc in key_codes]
-                print(f"  MIDI {note} -> {key_names}")
-            print("Press Ctrl+C to stop")
+            print("MIDI to Keyboard/CC mapper started!")
+            
+            # Display active mappings
+            if self.key_mappings:
+                print("\nKey mappings:")
+                for note, mapping in self.key_mappings.items():
+                    if mapping['type'] == 'key':
+                        key_names = [self.get_key_name(kc) for kc in mapping['key_codes']]
+                        print(f"  MIDI {note} -> {key_names}")
+            
+            if self.cc_mappings:
+                print("\nCC mappings:")
+                for cc, mapping in self.cc_mappings.items():
+                    print(f"  CC {cc} -> {mapping.get('type', 'unknown')} ({mapping.get('desc', '')})")
+            
+            print("\nPress Ctrl+C to stop")
             
             # Keep the program running
             while self.running:
@@ -280,28 +391,30 @@ class WaylandMidiMapper:
     def stop(self):
         """Stop the mapper and clean up"""
         self.running = False
-        # Release all active keys (for CC that are held)
-        for key_codes in self.active_notes.values():
+        
+        # Release all active keys
+        for key_codes in self.active_cc.values():
             for key_code in reversed(key_codes):
                 self.ui.write(e.EV_KEY, key_code, 0)
+        
         self.ui.syn()
         
         if self.midi_in:
             self.midi_in.close_port()
         if self.ui:
             self.ui.close()
-        print("MIDI to Keyboard mapper stopped.")
+        
+        print("MIDI mapper stopped.")
 
 def main():
-    parser = argparse.ArgumentParser(description='MIDI to Keyboard Daemon - Key Combinations')
+    parser = argparse.ArgumentParser(description='MIDI to Keyboard/CC Mapper')
     parser.add_argument('--config', '-c', required=True, help='Configuration file')
     parser.add_argument('--port', '-p', type=int, default=0, help='MIDI port number')
     
     args = parser.parse_args()
     
-    # Check if running as root
     if os.geteuid() != 0:
-        print("Error: This daemon requires root privileges to simulate keyboard input.")
+        print("Error: This daemon requires root privileges to simulate input.")
         print("Please run through the GUI or use: sudo python3 midi2keyboard_daemon.py -c config.json -p PORT")
         sys.exit(1)
     

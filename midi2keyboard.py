@@ -119,17 +119,19 @@ class MidiMapperGUI:
         mappings_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
         mappings_frame.columnconfigure(1, weight=1)
         
-        # Treeview for mappings
-        columns = ('midi_note', 'key_combination', 'description')
+        # Treeview for mappings - with 4 columns now
+        columns = ('midi_note', 'action_type', 'key_combination', 'description')
         self.mappings_tree = ttk.Treeview(mappings_frame, columns=columns, show='headings', height=12)
-        
+
         # Define headings
         self.mappings_tree.heading('midi_note', text='MIDI Note/CC')
-        self.mappings_tree.heading('key_combination', text='Key Combination')
+        self.mappings_tree.heading('action_type', text='Action Type')
+        self.mappings_tree.heading('key_combination', text='Key/Details')
         self.mappings_tree.heading('description', text='Description')
-        
+
         # Define columns
-        self.mappings_tree.column('midi_note', width=120)
+        self.mappings_tree.column('midi_note', width=100)
+        self.mappings_tree.column('action_type', width=100)
         self.mappings_tree.column('key_combination', width=200)
         self.mappings_tree.column('description', width=400)
         
@@ -143,6 +145,43 @@ class MidiMapperGUI:
         # Key combination builder
         combo_frame = ttk.LabelFrame(mappings_frame, text="Key Combination Builder", padding="10")
         combo_frame.grid(row=1, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=10)
+        
+        
+        # CC Mapping Options
+        cc_frame = ttk.LabelFrame(mappings_frame, text="CC (Control Change) Mapping Options", padding="10")
+        cc_frame.grid(row=3, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=10)
+
+        # CC Action Type
+        ttk.Label(cc_frame, text="CC Action Type:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.cc_action_type = tk.StringVar(value="key")
+        cc_type_combo = ttk.Combobox(cc_frame, textvariable=self.cc_action_type, 
+                                    values=["key", "toggle", "slider", "mouse_wheel"], 
+                                    width=12, state="readonly")
+        cc_type_combo.grid(row=0, column=1, padx=5)
+
+        # CC Threshold/Parameters
+        params_frame = ttk.Frame(cc_frame)
+        params_frame.grid(row=1, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(params_frame, text="On Threshold:").grid(row=0, column=0, padx=5)
+        self.cc_threshold_var = tk.StringVar(value="64")
+        ttk.Entry(params_frame, textvariable=self.cc_threshold_var, width=8).grid(row=0, column=1, padx=5)
+
+        ttk.Label(params_frame, text="Repeat Rate:").grid(row=0, column=2, padx=5)
+        self.cc_repeat_var = tk.StringVar(value="0")
+        ttk.Entry(params_frame, textvariable=self.cc_repeat_var, width=8).grid(row=0, column=3, padx=5)
+
+        # Mouse wheel direction
+        ttk.Label(params_frame, text="Wheel Dir:").grid(row=0, column=4, padx=5)
+        self.cc_wheel_dir_var = tk.StringVar(value="vertical")
+        wheel_dir_combo = ttk.Combobox(params_frame, textvariable=self.cc_wheel_dir_var,
+                                    values=["vertical", "horizontal"], width=10)
+        wheel_dir_combo.grid(row=0, column=5, padx=5)
+
+        # Update UI when CC type changes
+        self.cc_action_type.trace('w', self.update_cc_ui)
+                
+        
         
         # Modifier keys
         mod_frame = ttk.Frame(combo_frame)
@@ -240,6 +279,13 @@ class MidiMapperGUI:
         # Populate mappings tree
         self.refresh_mappings_tree()
     
+    def update_cc_ui(self, *args):
+        """Update CC UI elements based on selected action type"""
+        action_type = self.cc_action_type.get()
+        # Show/hide appropriate controls based on action type
+        pass
+
+
     def get_available_keys(self):
         """Return list of available key names"""
         common_keys = [
@@ -346,18 +392,21 @@ class MidiMapperGUI:
             # Create default configuration with combinations
             self.current_mappings = {
                 'mappings': {
-                    '48': {'keys': ['b'], 'desc': 'Brush tool'},
-                    '50': {'keys': ['e'], 'desc': 'Eraser'},
-                    '52': {'keys': ['v'], 'desc': 'Select tool'},
-                    '53': {'keys': ['m'], 'desc': 'Move tool'},
-                    '55': {'keys': ['leftctrl', 'z'], 'desc': 'Undo'},
-                    '60': {'keys': ['leftctrl', 'shift', 'z'], 'desc': 'Redo'},
-                    '62': {'keys': ['leftctrl', 's'], 'desc': 'Save'},
-                    '64': {'keys': ['leftctrl', 'a'], 'desc': 'Select All'},
-                    '65': {'keys': ['leftctrl', 'c'], 'desc': 'Copy'},
-                    '67': {'keys': ['leftctrl', 'v'], 'desc': 'Paste'},
-                    '72': {'keys': ['leftbrace'], 'desc': 'Decrease brush size'},
-                    '74': {'keys': ['rightbrace'], 'desc': 'Increase brush size'},
+                    '48': {'type': 'key', 'keys': ['b'], 'desc': 'Brush tool'},
+                    '50': {'type': 'key', 'keys': ['e'], 'desc': 'Eraser'},
+                    '52': {'type': 'key', 'keys': ['v'], 'desc': 'Select tool'},
+                    '53': {'type': 'key', 'keys': ['m'], 'desc': 'Move tool'},
+                    '55': {'type': 'key', 'keys': ['leftctrl', 'z'], 'desc': 'Undo'},
+                    '60': {'type': 'key', 'keys': ['leftctrl', 'shift', 'z'], 'desc': 'Redo'},
+                    '62': {'type': 'key', 'keys': ['leftctrl', 's'], 'desc': 'Save'},
+                    '64': {'type': 'key', 'keys': ['leftctrl', 'a'], 'desc': 'Select All'},
+                    '65': {'type': 'key', 'keys': ['leftctrl', 'c'], 'desc': 'Copy'},
+                    '67': {'type': 'key', 'keys': ['leftctrl', 'v'], 'desc': 'Paste'},
+                    '72': {'type': 'key', 'keys': ['leftbrace'], 'desc': 'Decrease brush size'},
+                    '74': {'type': 'key', 'keys': ['rightbrace'], 'desc': 'Increase brush size'},
+                    # Example CC mappings
+                    '1': {'type': 'mouse_wheel', 'wheel_dir': 'vertical', 'desc': 'Vertical scroll'},
+                    '2': {'type': 'mouse_wheel', 'wheel_dir': 'horizontal', 'desc': 'Horizontal scroll'},
                 },
                 'midi_port': 0
             }
@@ -391,29 +440,40 @@ class MidiMapperGUI:
         
         if 'mappings' in self.current_mappings:
             for note, mapping in self.current_mappings['mappings'].items():
-                # Format key combination for display
-                keys = mapping['keys']
-                display_keys = "+".join(k.upper() if len(k) > 1 else k for k in keys)
+                # Format display based on mapping type
+                if mapping.get('type') == 'key':
+                    keys = mapping.get('keys', [])
+                    display_keys = "+".join(k.upper() if len(k) > 1 else k for k in keys)
+                    action_type = "Key"
+                else:
+                    display_keys = mapping.get('type', '').upper()
+                    if mapping.get('type') == 'mouse_wheel':
+                        display_keys += f" ({mapping.get('wheel_dir', 'vertical')})"
+                    action_type = "CC Action"
+                
+                desc = mapping.get('desc', '')
                 
                 self.mappings_tree.insert('', tk.END, values=(
-                    note, display_keys, mapping['desc']
+                    note, action_type, display_keys, desc
                 ))
     
+        # Update treeview headings
+        self.mappings_tree.heading('midi_note', text='MIDI Note/CC')
+        self.mappings_tree.heading('key_combination', text='Action Type')
+        self.mappings_tree.heading('description', text='Details/Description')
+    
     def add_mapping(self):
-        """Add a new mapping"""
+        """Add a new mapping with CC support"""
         note = self.new_note_var.get().strip()
         key_combination = self.get_current_combination()
         desc = self.new_desc_var.get().strip()
+        cc_action_type = self.cc_action_type.get()
         
         if not note:
             messagebox.showwarning("Input Error", "Please enter a MIDI note/CC number")
             return
         
-        if not key_combination:
-            messagebox.showwarning("Input Error", "Please select at least one key")
-            return
-        
-        # Validate MIDI note is a number
+        # Validate MIDI note/CC is a number
         try:
             note_int = int(note)
             if note_int < 0 or note_int > 127:
@@ -423,23 +483,70 @@ class MidiMapperGUI:
             messagebox.showwarning("Input Error", "MIDI note/CC must be a number")
             return
         
+        if cc_action_type == "key":
+            if not key_combination:
+                messagebox.showwarning("Input Error", "Please select at least one key")
+                return
+            
+            # Standard key mapping
+            mapping_data = {
+                'type': 'key',
+                'keys': key_combination,
+                'desc': desc or f"MIDI {note} to {'+'.join(key_combination)}"
+            }
+        else:
+            # CC-specific mapping
+            mapping_data = {
+                'type': cc_action_type,
+                'desc': desc or f"MIDI CC {note} - {cc_action_type}"
+            }
+            
+            # Add threshold for toggle/slider/mouse_wheel
+            if cc_action_type in ['toggle', 'slider', 'mouse_wheel']:
+                try:
+                    threshold = int(self.cc_threshold_var.get())
+                    if 0 <= threshold <= 127:
+                        mapping_data['threshold'] = threshold
+                    else:
+                        messagebox.showwarning("Input Error", "Threshold must be between 0 and 127")
+                        return
+                except ValueError:
+                    messagebox.showwarning("Input Error", "Threshold must be a number (0-127)")
+                    return
+            
+            # Add repeat rate for slider
+            if cc_action_type == 'slider':
+                try:
+                    repeat_rate = int(self.cc_repeat_var.get())
+                    if repeat_rate >= 0:
+                        mapping_data['repeat_rate'] = repeat_rate
+                    else:
+                        messagebox.showwarning("Input Error", "Repeat rate must be 0 or positive")
+                        return
+                except ValueError:
+                    mapping_data['repeat_rate'] = 0
+            
+            # Add wheel direction for mouse_wheel
+            if cc_action_type == 'mouse_wheel':
+                mapping_data['wheel_dir'] = self.cc_wheel_dir_var.get()
+            
+            # Add keys if user selected any (for toggle/slider)
+            if cc_action_type in ['toggle', 'slider'] and key_combination:
+                mapping_data['keys'] = key_combination
+        
         if 'mappings' not in self.current_mappings:
             self.current_mappings['mappings'] = {}
         
-        self.current_mappings['mappings'][note] = {
-            'keys': key_combination,
-            'desc': desc or f"MIDI {note} to {'+'.join(key_combination)}"
-        }
+        self.current_mappings['mappings'][note] = mapping_data
         
         self.refresh_mappings_tree()
         self.new_note_var.set('')
         self.new_desc_var.set('')
-        # Don't clear the key combination - user might want to add another mapping with same combo
         
         # Auto-save configuration
         self.save_config()
         
-        print(f"Added mapping: MIDI {note} -> {key_combination} ({desc})")
+        print(f"Added mapping: MIDI {note} -> {mapping_data}")
     
     def remove_mapping(self):
         """Remove selected mapping"""
@@ -714,9 +821,10 @@ class MidiMapperGUI:
         
         if 'mappings' in self.current_mappings:
             for note, mapping in self.current_mappings['mappings'].items():
-                daemon_config['mappings'][note] = mapping['keys']
+                # Export full mapping structure, not just keys
+                daemon_config['mappings'][note] = mapping
         
-        export_path = self.config_file.parent / 'daemon_mappings.json'
+        export_path = self.config_file.parent / 'daemon_mappings_combos.json'
         with open(export_path, 'w') as f:
             json.dump(daemon_config, f, indent=2)
         
